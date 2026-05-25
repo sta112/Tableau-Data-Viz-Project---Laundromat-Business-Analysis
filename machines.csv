@@ -1,0 +1,23 @@
+Machine_ID,Machine_Type,Brand,Purchase_Date,Machine_Status
+W01,Washer,Whirlpool,2023-03-08,Needs Repair
+W02,Washer,Whirlpool,2023-03-09,Active
+W03,Washer,Whirlpool,2023-03-04,Active
+W04,Washer,Whirlpool,2023-03-04,Active
+W05,Washer,Whirlpool,2023-03-03,Needs Repair
+W06,Washer,Speed Queen,2023-06-01,Active
+W07,Washer,Speed Queen,2023-06-04,Active
+W08,Washer,Speed Queen,2023-06-01,Active
+W09,Washer,Speed Queen,2023-06-04,Active
+W10,Washer,Speed Queen,2023-06-07,Active
+D01,Dryer,Speed Queen,2023-06-01,Active
+D02,Dryer,Speed Queen,2023-06-07,Needs Repair
+D03,Dryer,Speed Queen,2023-06-07,Active
+D04,Dryer,Speed Queen,2023-05-29,Needs Repair
+D05,Dryer,Speed Queen,2023-05-29,Active
+D06,Dryer,Electrolux,2023-09-13,Active
+D07,Dryer,Electrolux,2023-09-13,Active
+D08,Dryer,Electrolux,2023-09-20,Active
+D09,Dryer,Electrolux,2023-09-24,Active
+D10,Dryer,Electrolux,2023-09-12,Active
+VM01,Vending Machine,Seaga,2023-04-25,Active
+VM02,Vending Machine,Seaga,2023-04-16,Active

@@ -1,0 +1,4 @@
+Product_ID,Product_Name,Brand_Name,Unit_Cost,Unit_Price,Supplier
+PROD001,Tide Detergent Pack,Tide,0.6,1.5,CleanCo Distributors
+PROD002,Gain Dryer Sheets,Gain,0.35,1.0,CleanCo Distributors
+PROD003,Resolve Stain Remover Pack,Resolve,0.7,2.0,CleanCo Distributors
