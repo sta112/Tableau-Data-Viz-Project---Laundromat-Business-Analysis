@@ -30,8 +30,30 @@ To build this business simulation (10 washers, 10 dryers, 2 vending machines), I
 * **`numpy`**: Leveraged for its vectorized mathematical functions and random sampling capabilities (`numpy.random`). This was critical for generating random (but constrained) distributions for transaction frequencies, customer behavior, and cost variances.
 * **`datetime` / `calendar`**: Utilized to manipulate timestamps, extract specific days of the week (to program weekend spikes), and isolate months (to calculate winter vs. summer utility variations).
 
----
-
 ### How the 4 Tables Were Developed
 
 The pipeline operates to build three **Dimension (Lookup) tables** before compiling the central **Fact (Transaction) table**
+
+Below is snippet of the core data compilation loop:
+
+```python
+# Business Logic Loop: Simulating Time Series Transaction Velocity
+current_date = START_DATE
+while current_date <= END_DATE:
+    is_weekend = current_date.weekday() >= 5
+    
+    # Calculate non-linear growth curve multiplier (Ramp-up phase transition)
+    time_delta_ratio = (current_date - START_DATE).days / TOTAL_DAYS
+    growth_ramp_multiplier = 0.4 + (0.6 * np.sin(time_delta_ratio * (np.pi / 2)))
+    
+    # Enforce heavy weekend utilization spikes
+    daily_base_traffic = np.random.randint(180, 240) if is_weekend else np.random.randint(90, 130)
+    adjusted_daily_traffic = int(daily_base_traffic * growth_ramp_multiplier)
+    
+    # Distribute activity realistically across operational hours
+    for _ in range(adjusted_daily_traffic):
+        hour = int(np.random.choice(np.arange(0, 24), p=HOURLY_PROBABILITY_DISTRIBUTION))
+        stream_choice = np.random.choice(['Machine', 'Vending'], p=[0.85, 0.15])
+        
+        # Calculations continue down to compute specific dynamic COGS & structural constraints...
+---
