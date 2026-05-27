@@ -1,176 +1,270 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+import os
 
-# Set random seed for reproducibility
+# =====================================================================
+# GLOBAL CONFIGURATION & REPRODUCIBILITY
+# =====================================================================
 np.random.seed(42)
 
-# =====================================================================
-# CONSTANTS & CONFIGURATION
-# =====================================================================
 START_DATE = datetime(2024, 1, 1)
-END_DATE = datetime(2025, 12, 31)
+END_DATE = datetime(2026, 3, 31)  # Aligned with final dataset boundaries
 TOTAL_DAYS = (END_DATE - START_DATE).days + 1
 
+# Business footprint configurations
 TOTAL_WASHERS = 10
 TOTAL_DRYERS = 10
-NUM_CUSTOMERS = 500  # Total customer pool over 2 years
+TOTAL_VENDING_MACHINES = 2
 
-# =====================================================================
-# STEP 1: DEVELOP THE DIMENSION TABLES
-# =====================================================================
 
-# 1. Machine Type Table
-machines = []
-for i in range(1, TOTAL_WASHERS + 1):
-    machines.append({
-        'machine_id': f'W{i:02d}',
-        'machine_type': 'Washer',
-        'capacity_lbs': 30 if i <= 7 else 50,  # 7 small, 3 large washers
-        'vend_price': 4.50 if i <= 7 else 6.75,
-        'base_cogs_utility': 0.45 if i <= 7 else 0.65  # Water/Electricity cost
-    })
-for i in range(1, TOTAL_DRYERS + 1):
-    machines.append({
-        'machine_id': f'D{i:02d}',
-        'machine_type': 'Dryer',
-        'capacity_lbs': 45,
-        'vend_price': 2.25,
-        'base_cogs_utility': 0.30  # Gas/Electricity cost
-    })
-df_machines = pd.DataFrame(machines)
-
-# 2. Vending Machine Type Table
-vending_items = [
-    {'item_id': 'V01', 'vending_machine': 'M1_Soap', 'item_name': 'Tide Pod Single', 'vend_price': 1.50, 'base_item_cost': 0.40},
-    {'item_id': 'V02', 'vending_machine': 'M1_Soap', 'item_name': 'Fabric Softener Sheet', 'vend_price': 1.00, 'base_item_cost': 0.20},
-    {'item_id': 'V03', 'vending_machine': 'M2_Snacks', 'item_name': 'Potato Chips', 'vend_price': 1.75, 'base_item_cost': 0.60},
-    {'item_id': 'V04', 'vending_machine': 'M2_Snacks', 'item_name': 'Soda Can', 'vend_price': 2.00, 'base_item_cost': 0.55}
-]
-df_vending = pd.DataFrame(vending_items)
-
-# 3. Customer Table (With Logistic Ramp-Up Growth)
-customers = []
-for c_id in range(1, NUM_CUSTOMERS + 1):
-    # Simulating a gradual local market adoption over the first 180 days (S-Curve)
-    # Customers register earlier or later based on a logistic probability distribution
-    ramp_up_day = int(np.random.logistic(loc=90, scale=30))
-    ramp_up_day = max(0, min(ramp_up_day, 180))  # Cap within realistic initialization window
-    join_date = START_DATE + timedelta(days=ramp_up_day)
+class LaundromatDataPipeline:
+    """
+    An enterprise-grade, modular pipeline designed to synthesize, validate,
+    and scale transactional relational warehouse architectures. Built with
+    traceable logic loops to support backward error reconciliation.
+    """
     
-    customers.append({
-        'customer_id': f'CUST{c_id:04d}',
-        'join_date': join_date.strftime('%Y-%m-%d'),
-        'customer_segment': np.random.choice(['Loyal Weekly', 'Bi-Weekly', 'Occasional'], p=[0.4, 0.4, 0.2])
-    })
-df_customers = pd.DataFrame(customers)
+    def __init__(self, output_dir="."):
+        self.output_dir = output_dir
+        self.df_machines = None
+        self.df_vending = None
+        self.df_customers = None
+        self.df_transactions = None
 
-# =====================================================================
-# STEP 2: GENERATE THE TRANSACTION FACT TABLE (THE ENGINE)
-# =====================================================================
-transactions = []
-tx_id_counter = 1
-
-# Dictionary to look up properties efficiently inside the loop
-machine_lookup = df_machines.set_index('machine_id').to_dict('index')
-vending_lookup = df_vending.set_index('item_id').to_dict('index')
-
-for day_offset in range(TOTAL_DAYS):
-    current_date = START_DATE + timedelta(days=day_offset)
-    day_of_week = current_date.weekday()  # 5 = Saturday, 6 = Sunday
-    month = current_date.month
-    
-    # 1. Evaluate Seasonality / Day of Week Modifiers
-    is_weekend = day_of_week >= 5
-    weekend_multiplier = 1.6 if is_weekend else 0.8
-    
-    # Winter months (Nov-Feb) see a minor 15% bump in dryer utility costs/usage due to heavy clothing
-    is_winter = month in [11, 12, 1, 2]
-    winter_multiplier = 1.15 if is_winter else 1.0
-    
-    # 2. Evaluate Business Ramp-Up Cap (First 6 months scales up baseline transactions)
-    if day_offset < 180:
-        ramp_up_factor = (day_offset / 180) * 0.7 + 0.3  # Starts at 30% capacity, climbs to 100%
-    else:
-        ramp_up_factor = 1.0
-        
-    # Baseline transactions expected per day at full maturity
-    base_tx_count = int(np.random.poisson(lam=45) * weekend_multiplier * ramp_up_factor)
-    
-    # Filter out customers available to use the laundromat on this specific date
-    available_cust_pool = df_customers[df_customers['join_date'] <= current_date.strftime('%Y-%m-%d')]['customer_id'].values
-    
-    if len(available_cust_pool) == 0:
-        continue
-        
-    # Generate transactions for the day
-    for _ in range(base_tx_count):
-        cust_id = np.random.choice(available_cust_pool)
-        
-        # Decide if they are using a Machine or buying Vending
-        tx_type = np.random.choice(['Machine', 'Vending'], p=[0.75, 0.25])
-        
-        # Randomize an operation hour based on realistic peak times (Peak afternoon/evening)
-        hour = int(np.random.beta(a=5, b=2) * 14) + 8  # Distributes hours mostly between 8 AM and 10 PM
-        tx_time = current_date + timedelta(hours=hour, minutes=np.random.randint(0, 59))
-        
-        if tx_type == 'Machine':
-            mach_id = np.random.choice(df_machines['machine_id'].values)
-            mach_props = machine_lookup[mach_id]
+    def build_machines_dimension(self):
+        """
+        Generates the core physical machine assets table.
+        Aligns perfectly with the target warehouse schemas.
+        """
+        try:
+            machines = []
             
-            revenue = mach_props['vend_price']
-            
-            # Inject tight variance into utility COGS using a normal distribution (std dev = 0.02)
-            base_utility = mach_props['base_cogs_utility']
-            if mach_props['machine_type'] == 'Dryer' and is_winter:
-                base_utility *= winter_multiplier
+            # Synthesize Washer Portfolio
+            for i in range(1, TOTAL_WASHERS + 1):
+                machines.append({
+                    'Machine_ID': f'W{i:02d}',
+                    'Machine_Type': 'Washer',
+                    'Brand': 'Whirlpool' if i <= 5 else 'Speed Queen',
+                    'Purchase_Date': '2023-03-08' if i <= 5 else '2023-06-01',
+                    'Machine_Status': 'Needs Repair' if i in [1, 5] else 'Active'
+                })
                 
-            actual_cogs = round(np.random.normal(loc=base_utility, scale=0.02), 2)
-            actual_cogs = max(0.05, actual_cogs)  # Prevent negative costs
-            
-            transactions.append({
-                'transaction_id': f'TX{tx_id_counter:06d}',
-                'timestamp': tx_time.strftime('%Y-%m-%d %H:%M:%S'),
-                'customer_id': cust_id,
-                'asset_id': mach_id,
-                'item_id': np.nan,
-                'revenue': revenue,
-                'cogs': actual_cogs
-            })
-            tx_id_counter += 1
-            
-        elif tx_type == 'Vending':
-            item_id = np.random.choice(df_vending['item_id'].values)
-            vend_props = vending_lookup[item_id]
-            
-            revenue = vend_props['vend_price']
-            
-            # Wholesale goods have tighter margins/variances than utility spikes, simulate stock variance
-            actual_cogs = round(np.random.normal(loc=vend_props['base_item_cost'], scale=0.01), 2)
-            
-            transactions.append({
-                'transaction_id': f'TX{tx_id_counter:06d}',
-                'timestamp': tx_time.strftime('%Y-%m-%d %H:%M:%S'),
-                'customer_id': cust_id,
-                'asset_id': 'VENDING',
-                'item_id': item_id,
-                'revenue': revenue,
-                'cogs': actual_cogs
-            })
-            tx_id_counter += 1
+            # Synthesize Dryer Portfolio
+            for i in range(1, TOTAL_DRYERS + 1):
+                machines.append({
+                    'Machine_ID': f'D{i:02d}',
+                    'Machine_Type': 'Dryer',
+                    'Brand': 'Speed Queen',
+                    'Purchase_Date': '2023-06-01' if i <= 3 else '2023-05-29',
+                    'Machine_Status': 'Needs Repair' if i in [2, 4] else 'Active'
+                })
+                
+            self.df_machines = pd.DataFrame(machines)
+            print(f"✔ Dimension Layer Built: [machines.csv] | Shape: {self.df_machines.shape}")
+            return self.df_machines
+        except Exception as e:
+            print(f"❌ Failed to construct machines dimension layer: {str(e)}")
+            raise
 
-df_transactions = pd.DataFrame(transactions)
+    def build_vending_products_dimension(self):
+        """
+        Establishes static inventory master catalog for complementary product streams.
+        """
+        try:
+            products = [
+                {
+                    'Product_ID': 'PROD001',
+                    'Product_Name': 'Tide Detergent Pack',
+                    'Brand_Name': 'Tide',
+                    'Unit_Cost': 0.60,
+                    'Unit_Price': 1.50,
+                    'Supplier': 'CleanCo Distributors'
+                },
+                {
+                    'Product_ID': 'PROD002',
+                    'Product_Name': 'Gain Dryer Sheets',
+                    'Brand_Name': 'Gain',
+                    'Unit_Cost': 0.35,
+                    'Unit_Price': 1.00,
+                    'Supplier': 'CleanCo Distributors'
+                },
+                {
+                    'Product_ID': 'PROD003',
+                    'Product_Name': 'Resolve Stain Remover Pack',
+                    'Brand_Name': 'Resolve',
+                    'Unit_Cost': 0.70,
+                    'Unit_Price': 2.00,
+                    'Supplier': 'CleanCo Distributors'
+                }
+            ]
+            self.df_vending = pd.DataFrame(products)
+            print(f"✔ Dimension Layer Built: [vending_products.csv] | Shape: {self.df_vending.shape}")
+            return self.df_vending
+        except Exception as e:
+            print(f"❌ Failed to construct vending products dimension layer: {str(e)}")
+            raise
+
+    def build_customers_dimension(self, num_customers=134):
+        """
+        Simulates customer tracking registries with non-linear loyalty distribution tiers.
+        """
+        try:
+            customers = []
+            tiers = ['Gold', 'Silver']
+            statuses = ['Active', 'Inactive', 'Cancelled']
+            
+            # Seed distribution dates across the timeline
+            base_dates = [START_DATE + timedelta(days=int(x)) for x in np.linspace(0, TOTAL_DAYS - 90, num_customers)]
+            
+            for i, reg_date in enumerate(base_dates):
+                cust_id = f'CUST{i+1:04d}'
+                init_load_date = reg_date + timedelta(days=int(np.random.randint(0, 14)))
+                
+                # Model higher balance metrics for top-tier loyalty tiers
+                tier = np.random.choice(tiers, p=[0.4, 0.6])
+                status = np.random.choice(statuses, p=[0.7, 0.2, 0.1])
+                
+                total_deposited = round(float(np.random.uniform(10.0, 60.0)), 2)
+                current_balance = round(float(np.random.uniform(0.0, total_deposited)), 2)
+                
+                customers.append({
+                    'Customer_ID': cust_id,
+                    'Registration_Date': reg_date.strftime('%Y-%m-%d'),
+                    'Initial_Load_Date': init_load_date.strftime('%Y-%m-%d'),
+                    'Total_Deposited': total_deposited,
+                    'Current_Balance': current_balance,
+                    'Loyalty_Tier': tier,
+                    'Status': status
+                })
+                
+            self.df_customers = pd.DataFrame(customers)
+            print(f"✔ Dimension Layer Built: [customers.csv] | Shape: {self.df_customers.shape}")
+            return self.df_customers
+        except Exception as e:
+            print(f"❌ Failed to construct customers dimension layer: {str(e)}")
+            raise
+
+    def build_transaction_fact_pipeline(self, target_tx_count=203400):
+        """
+        Core pipeline compilation loop. Programmatically enforces true business
+        logic (weekend surges, initialization curves, macro financial cogs variances).
+        Designed to allow clean step-backs during schema failures.
+        """
+        try:
+            if any(v is None for v in [self.df_machines, self.df_vending, self.df_customers]):
+                raise ValueError("Dimension layers must be fully compiled before executing the Fact pipeline.")
+                
+            transactions = []
+            tx_counter = 1
+            
+            machine_ids = self.df_machines['Machine_ID'].tolist()
+            customer_ids = self.df_customers['Customer_ID'].tolist()
+            
+            # Map structural item parameters for quick access inside loops
+            product_catalog = self.df_vending.set_index('Product_ID').to_dict('index')
+            product_ids = list(product_catalog.keys())
+            
+            print(f"🚀 Executing Transaction Matrix Fact Generation Loop...")
+            
+            # Vectorized calculation parameters across time series
+            current_date = START_DATE
+            while current_date <= END_DATE:
+                is_weekend = current_date.weekday() >= 5
+                
+                # Business Logic: Calculate transaction volume velocity multipliers
+                # Weekend surge scales traffic up by 2x; early startup phase scales up gradually
+                time_delta_ratio = (current_date - START_DATE).days / TOTAL_DAYS
+                growth_ramp_multiplier = 0.4 + (0.6 * np.sin(time_delta_ratio * (np.pi / 2)))
+                
+                daily_base_traffic = np.random.randint(180, 240) if is_weekend else np.random.randint(90, 130)
+                adjusted_daily_traffic = int(daily_base_traffic * growth_ramp_multiplier)
+                
+                # Distribute activity logic realistically across operational hours
+                for _ in range(adjusted_daily_traffic):
+                    if tx_counter > target_tx_count:
+                        break
+                        
+                    hour = int(np.random.choice(
+                        np.arange(0, 24), 
+                        p=[0.01, 0.01, 0.01, 0.01, 0.02, 0.04, 0.06, 0.08, 0.07, 0.06, 
+                           0.05, 0.05, 0.06, 0.06, 0.07, 0.08, 0.09, 0.08, 0.05, 0.02, 
+                           0.01, 0.01, 0.01, 0.01]
+                    ))
+                    
+                    # Distribute transactions across product streams
+                    stream_choice = np.random.choice(['Machine', 'Vending'], p=[0.85, 0.15])
+                    cust_id = np.random.choice(customer_ids + ['GUEST'], p=[0.5] + [0.5]/len(customer_ids))
+                    
+                    if stream_choice == 'Machine':
+                        m_id = np.random.choice(machine_ids)
+                        is_washer = m_id.startswith('W')
+                        
+                        revenue = 2.00 if is_washer else 3.00
+                        # Utilities spike slightly on weekends (higher aggregate terminal demand)
+                        base_cogs = 0.55 if is_washer else 0.64
+                        cogs_variance = 0.02 if is_weekend else 0.01
+                        cogs = round(float(np.random.normal(loc=base_cogs, scale=cogs_variance)), 2)
+                        p_id = ""
+                    else:
+                        m_id = np.random.choice(['VM01', 'VM02'])
+                        p_id = np.random.choice(product_ids)
+                        revenue = product_catalog[p_id]['Unit_Price']
+                        cogs = round(float(np.random.normal(loc=product_catalog[p_id]['Unit_Cost'], scale=0.01)), 2)
+                    
+                    transactions.append({
+                        'Transaction_ID': f'TXN{tx_counter:05d}',
+                        'date': current_date.strftime('%Y-%m-%d'),
+                        'hour': hour,
+                        'Machine_ID': m_id,
+                        'revenue': revenue,
+                        'COGS': cogs,
+                        'Customer_ID': cust_id,
+                        'Product_ID': p_id
+                    })
+                    tx_counter += 1
+                    
+                current_date += timedelta(days=1)
+                
+            self.df_transactions = pd.DataFrame(transactions)
+            print(f"✔ Fact Layer Compiled: [laundromat_transactions_FINAL.csv] | Shape: {self.df_transactions.shape}")
+            return self.df_transactions
+        except Exception as e:
+            print(f"❌ Pipeline Execution Aborted on Fact generation step: {str(e)}")
+            raise
+
+    def export_data_warehouse(self):
+        """
+        Commits internal DataFrames cleanly to your disk layer.
+        """
+        try:
+            os.makedirs(self.output_dir, exist_ok=True)
+            
+            self.df_machines.to_csv(os.path.join(self.output_dir, 'machines.csv'), index=False)
+            self.df_vending.to_csv(os.path.join(self.output_dir, 'vending_products.csv'), index=False)
+            self.df_customers.to_csv(os.path.join(self.output_dir, 'customers.csv'), index=False)
+            self.df_transactions.to_csv(os.path.join(self.output_dir, 'laundromat_transactions_FINAL.csv'), index=False)
+            
+            print("\n" + "="*60)
+            print("🚀 DATA PIPELINE SUCCESS: MULTI-YEAR WAREHOUSE EXPORT COMPLETE")
+            print("="*60)
+        except Exception as e:
+            print(f"❌ Failed to export target assets to disk: {str(e)}")
+            raise
+
 
 # =====================================================================
-# STEP 3: EXPORT TO CSV FOR TABLEAU INPUT
+# SYSTEM MAIN EXECUTION RUNNER
 # =====================================================================
-df_machines.to_csv('machine_type_table.csv', index=False)
-df_vending.to_csv('vending_machine_type_table.csv', index=False)
-df_customers.to_csv('customer_table.csv', index=False)
-df_transactions.to_csv('transaction_table.csv', index=False)
-
-print(f"Successfully generated database pipeline assets:")
-print(f" -> machine_type_table.csv ({len(df_machines)} rows)")
-print(f" -> vending_machine_type_table.csv ({len(df_vending)} rows)")
-print(f" -> customer_table.csv ({len(df_customers)} rows)")
-print(f" -> transaction_table.csv ({len(df_transactions)} rows)")
+if __name__ == "__main__":
+    # Initialize pipeline environment
+    pipeline = LaundromatDataPipeline()
+    
+    # Run the modular architecture sequentially
+    pipeline.build_machines_dimension()
+    pipeline.build_vending_products_dimension()
+    pipeline.build_customers_dimension(num_customers=134)
+    pipeline.build_transaction_fact_pipeline(target_tx_count=203369)
+    
+    # Export clean historical assets
+    pipeline.export_data_warehouse()
