@@ -6,13 +6,12 @@ Markdown
 ## Interactive Dashboard
 Click the preview image below to view and interact with the live dashboard on Tableau Public.
 
-[![Tableau Dashboard Preview](Screen Shot 2026-05-25 at 2.07.37 PM.png)](https://prod-ca-a.online.tableau.com/t/sophiatse51-925239984f/views/LaundromatDashboard/SalesDashboard)
-
+[![Tableau Dashboard Preview](Dashboard%20Screenshot.png)](https://prod-ca-a.online.tableau.com/t/sophiatse51-925239984f/views/LaundromatDashboard/SalesDashboard)
 ---
 
 ## Business Problem
 
-This project analyzes the operational efficiency and financial performance of a independent, single-location laundromat equipped with **10 washers, 10 dryers, and 2 vending machines** (vending machine products: laudry pods, dryer sheets, stain remover packs). 
+This project analyzes the operational efficiency and financial performance of a independent, single-location laundromat equipped with **10 washers, 10 dryers, and 2 vending machines** (vending machine products: laundry pods, dryer sheets, stain remover packs). 
 
 Because historical data for this specific footprint was unavailable, I developed a realistic, synthetic relational database in Python to simulate a 3-year operational history. To ensure the data mirrored true retail conditions, the data pipeline incorporated:
 1. **The Business Ramp-Up Curve:** Simulating the initial grand opening phase, modeling a gradual customer acquisition curve over the first couple months until the business reached steady-state maturity.
